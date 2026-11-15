@@ -1,0 +1,128 @@
+# Reusable PHP CI: syntax lint on one or more PHP versions + composer checks.
+# Call from a repo:
+#   jobs:
+#     ci:
+#       uses: menarzullayev/.github/.github/workflows/ci-php.yml@main
+#       with:
+#         php-versions: '["7.4"]'            # must pass
+#         php-versions-experimental: '["8.5"]' # reported, never blocks
+#         exclude-paths: "vendor/* */runtime/*"
+name: Reusable PHP CI
+
+on:
+  workflow_call:
+    inputs:
+      php-versions:
+        description: JSON array of PHP versions that must lint cleanly
+        type: string
+        default: '["8.5"]'
+      php-versions-experimental:
+        description: JSON array of PHP versions linted for information only (empty = none)
+        type: string
+        default: '[]'
+      working-directory:
+        type: string
+        default: "."
+      exclude-paths:
+        description: Space-separated find -path patterns to skip (relative, e.g. "vendor/* wp-admin/*")
+        type: string
+        default: "vendor/* node_modules/*"
+      composer:
+        description: Run composer validate (and audit) when composer.json exists
+        type: boolean
+        default: true
+
+jobs:
+  lint:
+    name: php -l (${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJSON(inputs.php-versions) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: none
+          coverage: none
+      - name: Lint
+        env:
+          EXCLUDE: ${{ inputs.exclude-paths }}
+        run: |
+          set -euo pipefail
+          args=()
+          for p in $EXCLUDE; do args+=(-not -path "./$p"); done
+          find . -type f -name '*.php' "${args[@]}" -print0 > /tmp/php-files
+          total=$(tr -cd '\0' < /tmp/php-files | wc -c)
+          echo "Linting $total PHP files with $(php -r 'echo PHP_VERSION;')"
+          # php -l prints "No syntax errors" per file; keep only failures.
+          if ! xargs -0 -n1 -P"$(nproc)" php -d display_errors=1 -l < /tmp/php-files > /tmp/lint.out 2>&1; then
+            grep -v '^No syntax errors detected' /tmp/lint.out | sed 's/^/::error::/' || true
+            exit 1
+          fi
+          echo "OK: $total files"
+
+  lint-experimental:
+    name: php -l (${{ matrix.php }}, informational)
+    if: ${{ inputs.php-versions-experimental != '[]' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJSON(inputs.php-versions-experimental) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: none
+          coverage: none
+      - name: Lint
+        env:
+          EXCLUDE: ${{ inputs.exclude-paths }}
+        run: |
+          set -euo pipefail
+          args=()
+          for p in $EXCLUDE; do args+=(-not -path "./$p"); done
+          find . -type f -name '*.php' "${args[@]}" -print0 > /tmp/php-files
+          total=$(tr -cd '\0' < /tmp/php-files | wc -c)
+          echo "Linting $total PHP files with $(php -r 'echo PHP_VERSION;')"
+          # php -l prints "No syntax errors" per file; keep only failures.
+          if ! xargs -0 -n1 -P"$(nproc)" php -d display_errors=1 -l < /tmp/php-files > /tmp/lint.out 2>&1; then
+            grep -v '^No syntax errors detected' /tmp/lint.out | sed 's/^/::error::/' || true
+            exit 1
+          fi
+          echo "OK: $total files"
+
+  composer:
+    name: composer
+    if: ${{ inputs.composer }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ fromJSON(inputs.php-versions)[0] }}
+          tools: composer:v2
+          coverage: none
+      - name: Validate
+        run: |
+          if [ ! -f composer.json ]; then echo "no composer.json, skipping"; exit 0; fi
+          composer validate --no-check-publish --no-interaction
+      - name: Audit (informational)
+        continue-on-error: true
+        run: |
+          if [ ! -f composer.lock ]; then echo "no composer.lock, skipping"; exit 0; fi
+          composer audit --locked --no-interaction --format=plain

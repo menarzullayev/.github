@@ -1,0 +1,10 @@
+name: CI
+on:
+  push:
+    branches: ["$default-branch"]
+  pull_request:
+jobs:
+  ci:
+    uses: menarzullayev/.github/.github/workflows/ci-php.yml@main
+    with:
+      php-versions: '["8.5"]'
