@@ -1,0 +1,73 @@
+# Reusable Python CI: ruff (lint + format check) + pytest, on uv.
+# Call from a repo:
+#   jobs:
+#     ci:
+#       uses: menarzullayev/.github/.github/workflows/ci-python.yml@main
+#       with:
+#         python-version: "3.12"
+#         env-json: '{"BOT_TOKEN":"x","WEBHOOK_SECRET":"x"}'   # dummy env for import-time config
+name: Reusable Python CI
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version
+        type: string
+        default: "3.12"
+      run-tests:
+        description: Run pytest
+        type: boolean
+        default: true
+      run-lint:
+        description: Run ruff
+        type: boolean
+        default: true
+      working-directory:
+        description: Directory to run in
+        type: string
+        default: "."
+      env-json:
+        description: JSON object of dummy env vars exported for the whole job
+        type: string
+        default: "{}"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export dummy env
+        if: inputs.env-json != '{}'
+        shell: bash
+        run: |
+          echo '${{ inputs.env-json }}' \
+            | python3 -c 'import json,sys,os; [print(f"{k}={v}") for k,v in json.load(sys.stdin).items()]' \
+            >> "$GITHUB_ENV"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ inputs.python-version }}
+
+      - name: Install project
+        run: uv sync --all-extras --dev || uv pip install -e ".[dev]" || uv pip install -e .
+
+      - name: Ruff lint
+        if: inputs.run-lint
+        run: uvx ruff check .
+
+      - name: Ruff format check
+        if: inputs.run-lint
+        run: uvx ruff format --check .
+
+      - name: Pytest
+        if: inputs.run-tests
+        run: uv run pytest -q || [ "$?" = "5" ]   # exit 5 = no tests collected, treat as pass

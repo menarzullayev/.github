@@ -1,0 +1,53 @@
+# Reusable Node/TypeScript CI: install + lint + typecheck + test.
+# Call from a repo:
+#   jobs:
+#     ci:
+#       uses: menarzullayev/.github/.github/workflows/ci-node.yml@main
+#       with:
+#         node-version: "20"
+name: Reusable Node CI
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: "20"
+      working-directory:
+        type: string
+        default: "."
+      package-manager:
+        description: npm | pnpm | yarn
+        type: string
+        default: "npm"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Lint
+        run: npm run --if-present lint
+
+      - name: Typecheck
+        run: npm run --if-present typecheck
+
+      - name: Build
+        run: npm run --if-present build
+
+      - name: Test
+        run: npm run --if-present test
